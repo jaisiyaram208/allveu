@@ -1,0 +1,52 @@
+trigger: none
+#trigger:
+#  branches:
+#    include:
+#      - '*'
+
+pool:
+  name: 'K2-AutoScaling-Build-Acc'
+
+variables:
+  artifactS3Bucket: allvue-gl-artifacts2
+  stackname: "Gdnami-Cf-Orest1"
+  region: "us-east-1"
+#  adminsecret: "dummy"
+
+stages:
+  - stage: UploadArtifacts
+    displayName: "Upload Artifacts to S3"
+    condition: succeeded()
+    jobs:
+      - job: Upload
+        displayName: "Sync scripts folder to S3"
+        steps:
+          - script: |
+              echo "Syncing scripts folder to S3 bucket s3://$(artifactS3Bucket)/scripts ..."
+              aws s3 sync scripts s3://$(artifactS3Bucket)/scripts --delete
+            displayName: "Sync 'scripts' folder to S3"
+
+  - stage: DeployCFN
+    displayName: 'Deploy CloudFormation Template'
+    jobs:
+      - job: Deploy
+        displayName: 'Deploy CloudFormation Stack'
+        steps:
+          - checkout: self
+          - script: |
+              set -e
+              echo "Formatting parameters for CloudFormation CLI..."
+              mkdir -p parameters
+              cat parameters/dev-params.json | jq -r 'to_entries | map("\(.key)=\(.value|tostring)") | join(" ")' > parameters/cfn-params.txt
+
+              echo "Parameter file content:"
+              cat parameters/cfn-params.txt
+
+              echo "Deploying CloudFormation stack..."
+              aws cloudformation deploy \
+                --template-file templates/cf_goldenAMI.yml \
+                --stack-name $(stackname) \
+                --region $(region) \
+                --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+                --parameter-overrides $(cat parameters/cfn-params.txt)
+            displayName: 'Deploy CloudFormation Stack'
